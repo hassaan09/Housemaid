@@ -13,11 +13,12 @@ return new class extends Migration
         Schema::create('users', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->string('email');
+            $table->string('email')->unique();
             $table->string('password')->nullable();
             $table->enum('provider', ['google', 'facebook', 'local'])->default('local');
             $table->string('provider_id')->nullable();
             $table->timestamp('email_verified_at')->nullable();
+            $table->string('profile_pic')->nullable()->default('storage/images/cartoon-cute-school-boy-photo.jpg');
             $table->timestamps();
         });
     }

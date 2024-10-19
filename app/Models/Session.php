@@ -13,10 +13,8 @@ class Session extends Model
 
     protected $fillable = [
         'user_id',
-        'device_id',
         'token_id',
-        'last_activity',
-        'expires_at',
+        'device_id',
         'is_active',
     ];
 

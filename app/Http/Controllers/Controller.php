@@ -7,7 +7,8 @@ use Illuminate\Http\Request;
 use App\Models\Session;
 use Illuminate\Foundation\Validation\ValidatesRequests;
 use Illuminate\Routing\Controller as BaseController;
-use Illuminate\Http\JsonResponse;  
+use Illuminate\Http\JsonResponse;
+use Laravel\Sanctum\PersonalAccessToken;  
 
 class Controller extends BaseController
 {
@@ -44,17 +45,26 @@ class Controller extends BaseController
     // Logout Method
     public function logout(Request $request)
     {
-        $user = $request->user();
-
-        // Invalidate the current session token
-        Session::where('user_id', $user->id)
-            ->where('token', $request->bearerToken())
-            ->update(['is_active' => false]);
-
-        // Revoke the current token
-        $user->currentAccessToken()->delete();
-
-        return response()->json(['message' => 'Logged out successfully']);
+        try {
+            $user = $request->user();
+            $bearerToken = $request->bearerToken();
+            $token = PersonalAccessToken::findToken($bearerToken);
+            $tokenId = $token->id;
+            $userId = $token->tokenable_id;
+    
+            // Invalidate the current session token
+            Session::where('user_id', $userId)
+                ->where('token_id', $tokenId )
+                ->update(['is_active' => false]);
+    
+            // Revoke the current token
+            $user->currentAccessToken()->delete();
+            
+            return $this->jsonResponse(200, true, 'Logged out successfully', null);
+        } catch (\Exception $e) {
+            // If an error occurs, handle it with the protected handleError method
+            return $this->handleError($e);
+        }
     }
 
     // Helper json method:
@@ -73,9 +83,8 @@ class Controller extends BaseController
     {
         $session = Session::create([
             'user_id' => $user->id,
-            'device_id' => $deviceId,    
-            'token_id' => $tokenId,  
-            'last_activity' => now(),              
+            'token_id' => $tokenId,
+            'device_id' => $deviceId,                  
             'is_active' => true,                  
         ]);
         return $session;

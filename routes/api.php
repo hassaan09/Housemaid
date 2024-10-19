@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\GoogleController;
 use App\Http\Controllers\BasicAuthController;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\MediaController;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,20 +19,26 @@ use App\Http\Controllers\Controller;
 |
 */
 
+// Auth APIs
+
+Route::post('/register',[BasicAuthController::class,'register']);
+Route::post('/verify-otp', [BasicAuthController::class, 'verifyOtp']);
+
+Route::post('/login',[BasicAuthController::class,'login']);
+
+Route::post('/forget-password',[BasicAuthController::class,'forgetPassword']);
+Route::post('/change-password',[BasicAuthController::class,'changePassword']);
 
 Route::get('/signin/google',[GoogleController::class,'redirectToGoogle']);
 Route::get('/google/callback',[GoogleController::class,'handleGoogleCallback']);
 
 
 
-Route::post('/register',[BasicAuthController::class,'register']);
-Route::post('/verify-otp', [BasicAuthController::class, 'verifyOtp']);
-
 Route::post('/housemaid/register-with-questions',[BasicAuthController::class,'verifyQuestions']);
 
 
 
-Route::post('/login',[BasicAuthController::class,'login']);
+
 
 
 
@@ -41,6 +49,7 @@ Route::post('/login',[BasicAuthController::class,'login']);
 // Protected routes (Sanctum Middleware)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/logout', [Controller::class, 'logout']);
+
 });
 
 

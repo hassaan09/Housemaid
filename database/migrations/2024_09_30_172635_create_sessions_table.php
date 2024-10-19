@@ -15,12 +15,10 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('user_id');
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
+            $table->foreignId('token_id')->constrained('personal_access_tokens')->onDelete('cascade');
             $table->string('device_id')->nullable();
-            $table->string('token')->unique();
-            $table->timestamp('last_activity');
-            $table->timestamp('expires_at');
             $table->boolean('is_active');
-            $table->timestamps();
+            $table->timestamps(); // login_at and last_activity
 
         });
     }

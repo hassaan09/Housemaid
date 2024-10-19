@@ -22,9 +22,6 @@ class BasicAuthController extends Controller {
     {
         try {
 
-            // Clear any residue cache:
-            Cache::forget('registration_' . $request->email);
-
             $req = $request->validate([
                 'name' => 'required|string',
                 'email' => 'required|email',
@@ -34,30 +31,40 @@ class BasicAuthController extends Controller {
 
             // Validation handled in catch block
 
-            $tempRoleId = $request->query('role_id') ;
-            // Register new user
             $user = User::where('email',$req['email'])->first();
-            if($user && $user->roles->contains($tempRoleId)) {
+            if($user) {
 
-                return response()->json([
-                    'statusCode' => 409,
-                    'status' => false,
-                    'message' => 'User Already exists, Please Login',
-                    'data' => null,
-                ], 409);
+                if($user->provider !== 'local') {
+
+                    return response()->json([
+                        'statusCode' => 409,
+                        'status' => false,
+                        'message' => 'User Already exists with a social account, Please Login',
+                        'data' => null,
+                    ], 409);
+                }
+                else {
+                    return response()->json([
+                        'statusCode' => 409,
+                        'status' => false,
+                        'message' => 'User Already exists, Please Login',
+                        'data' => null,
+                    ], 409);
+
+                }
+
             }
 
-            // Temporarily store the user's data in cache
-            Cache::put('registration_' . $req['email'], [
+            // Hold the registeration data after issuing OTP:
+            Cache::put('registeration_' . $req['email'], [
                 'name' => $req['name'],
                 'email' => $req['email'],
                 'password' => Hash::make($req['password']),
-                'role_id' => $request->query('role_id', '1'),
-            ], now()->addMinutes(10));
+            ], now()->addMinutes(5));
 
             // Create an OTP:
             $otpCode = rand(1000,9999); 
-            $otpExpiration = now()->addMinutes(30);
+            $otpExpiration = now()->addMinutes(5);
 
             Otp::create([
                 'email' => $request->email,
@@ -107,52 +114,45 @@ class BasicAuthController extends Controller {
             ->where('email', $request->email)
             ->first();
 
+            if(!$otpRecord) {
+                return $this->jsonResponse(
+                    400, false, "OTP match failed, proceed to register again", null);
+            }
+
             if ($otpRecord->expires_at->isPast()) {
+                $otpRecord->delete();
                 return $this->jsonResponse(
                     400, false, "OTP timed-out, proceed to register again", null);
             }
 
             // Retrieve user from cache with the corrected key
-            $userData = Cache::get('registration_' . $request->email);
+            $userData = Cache::get('registeration_' . $request->email);
 
-            if ($userData['role_id']==="1") {
-                $user = User::create([
-                    'name' => $userData['name'],
-                    'email' => $userData['email'],
-                    'password' => $userData['password'], // Already hashed
-                ]);
+            $user = User::create([
+                'name' => $userData['name'],
+                'email' => $userData['email'],
+                'password' => $userData['password'], // Already hashed, default value local will be assigned for provider
+            ]);
+               
+            // Assign the role
+            $user->roles()->attach(1);
+            $user->email_verified_at = now();
+            $user->save();
 
-                 // Assign the role
-                $user->roles()->attach($userData['role_id']);
-                $user->email_verified_at = now();
-                $user->save();
+            $otpRecord->delete();
 
-                return $this->jsonResponse(
-                    201,
-                    true,
-                    "Client account created successfully, proceed to login page",
-                    $user->toArray()
-                    
-                );
-            } else{ 
-
+            return $this->jsonResponse(
+                201,
+                true,
+                "Account created successfully, proceed to login page",
+                $user->name
                 
-                return $this->jsonResponse(
-                    200,
-                    true,
-                    "Housemaide account creation in-progress, proceed to complete further questions",
-                    null
-                );
-
-            }
-
-            // Clear cache after successful registration
-        
-        } catch(ValidationException $e) {
+            );
+            } catch(ValidationException $e) {
             return $this->jsonResponse(
                 400,
                 false,
-                'OTP or email missing, proceed to register again',
+                'OTP or email missing',
                 null
             );
         } catch(\Exception $e) {
@@ -248,57 +248,67 @@ class BasicAuthController extends Controller {
                 'password' => 'required',
             ]);
 
-             // If user doesn't specify role_id or device_id, it will be assumed on own
-             $roleId = $request->query('role_id','1');
-             $deviceId = $request->query('device_id','web');
+            // validation handled by first catch()
 
             $user = User::where('email', $validated['email'])->first();
 
-            $role = Role::find($roleId)->first();
-
-            if(!$user->roles->contains($roleId)) {
+            if(!$user) {
                 return $this->jsonResponse(
-                    403,
+                    404,
                     false,
-                    'You dont have any account against this role',
-                    null);
+                    'Account does not exist',
+                    null,
+                );
             }
-            
-            if(!$user->password) {
+
+            if($user->provider !== 'local') {
+                return $this->jsonResponse(
+                    409,
+                    false,
+                    'Account exists with a social account',
+                    null,
+                );
+            }
+
+
+            if (!Hash::check($validated['password'],$user->password)) {
                 return $this->jsonResponse(
                     401,
                     false,
-                    "Login failed. already account exists against this email",
-                    null);
-            }
-
-            if (!$user || !Hash::check($validated['password'],$user->password)) {
-                return $this->jsonResponse(
-                    401,
-                    false,
-                    "Login failed",
+                    "Password doesn't match, login failed",
                     null
                 );
             }
 
+            $deviceId = $request->query('device_id','web');
+
             // Create a new token for the user
-            $token = $user->createToken('auth_token');
-            $plainTextToken = $token->plainTextToken;
-            $tokenId = $token->accessToken->id;
+            $token = $user->createToken('auth_token'); // Initiates a token in personal_access_token table
+            $plainTextToken = $token->plainTextToken; // To issue the user with a token
+            $tokenId = $token->accessToken->id; // To pass the token id to the session table
 
-             // Start a new session for the user
-             $this->startSession($user, $deviceId, $tokenId);
+            // Start a new session for the user
+            $userSession = $this->startSession($user, $deviceId, $tokenId);
 
-            // Return the access token
+            // For front-end ease:
+            $roles = $user->roles->pluck('id')->toArray();
+            $roleValue = in_array(1, $roles) && in_array(2, $roles) ? 12 : (in_array(1, $roles) ? 1 : 0);
+
+
+            // Profile pic:
+            $profilePicUrl = asset($user->profile_pic);
+
+            // Return the access token alongwith useful data
             return $this->jsonResponse(
                     200,
                     true,
                     "User logged in ",
-                    [
-                        'bearerToken' => $plainTextToken,
-                        'userName' => $user->name,
-                        'roleName'=> $role->role_name
-                        ]
+                    ['bearerToken' => $plainTextToken,
+                    'userName' => $user->name,
+                    'email' => $user->email ,
+                    'profilePicUrl' => $profilePicUrl,
+                    'roles' => $roleValue
+                    ]
                 );
         } catch(ValidationException $e) {
             return $this->jsonResponse(
@@ -318,5 +328,138 @@ class BasicAuthController extends Controller {
         }
        
     }
+
+    public function forgetPassword(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+            ]);
+
+            $user = User::where('email', $validated['email'])->first();
+            if(!$user) {
+                    return $this->jsonResponse(
+                        404,
+                        false,
+                        'Account does not exist',
+                        null,
+                    );
+                }
+
+            if($user->provider !== 'local') {
+                    return $this->jsonResponse(
+                        409,
+                        false,
+                        'Account exists with a social provider, plz contact your provider',
+                        null,
+                    );
+                }
+
+            // Delete all the tokens, so all the sessions become inactive:
+            $user->tokens()->delete();
+
+            // Create an OTP:
+                $otpCode = rand(1000,9999); 
+                $otpExpiration = now()->addMinutes(5);
+
+                Otp::create([
+                    'email' => $request->email,
+                    'otp' => $otpCode,
+                    'expires_at' => $otpExpiration,
+                ]);
+
+                $mailController = new MailController();
+                $mailController->sendEmail($request->email, $otpCode);
+                return $this->jsonResponse(
+                    200,
+                    true,
+                    'OTP sent to your email for password change. Check spam folder as well',
+                    ['email' => $request->email]
+                );        
+
+        } catch(ValidationException $e) {
+            return $this->jsonResponse(
+                400,
+                false,
+                'Email missing',
+                null
+            );
+        } catch(\Exception $e) {
+            return $this->jsonResponse(
+                500,
+                false,
+                'Internal Server Error',
+                null
+            );
+        }
+    }
+
+    public function changePassword(Request $request)
+    {
+        try {
+            $request->validate([
+                'email' => 'required|email',
+                'password' => 'required|string',
+                'otp' => 'required|string'
+                ]);
+
+            // Check the OTP in the database
+            $otpRecord = Otp::where('otp', $request->otp)
+            ->where('email', $request->email)
+            ->first();
+
+            if(!$otpRecord) {
+                return $this->jsonResponse(
+                    400, false, "OTP match failed", null);
+                }
+
+            if ($otpRecord->expires_at->isPast()) {
+                $otpRecord->delete();
+                return $this->jsonResponse(
+                    400, false, "OTP timed-out", null);
+                }
+            
+
+            // Retrieve the user from the database to ensure up-to-date data
+            $user = User::where('email', $request->email)->first();
+
+            if (!$user) {
+                return $this->jsonResponse(404, false, "User not found", null);
+            }
+
+            // Ensure the new password is not the same as the old one
+            if (Hash::check($request->password, $user->password)) {
+                return $this->jsonResponse(400, false, "New password cannot be the same as the old password", null);
+            }
+
+            // Update the user's password
+            $user->update([
+                'password' => Hash::make($request->password),
+            ]);
+
+            // Delete the OTP after the password change is successful
+            $otpRecord->delete();
+
+            return $this->jsonResponse(200, true, 'Password updated successfully', null);
+            
+
+        } catch(ValidationException $e) {
+            return $this->jsonResponse(
+                400,
+                false,
+                'Password or OTP missing',
+                null
+            );
+        } catch(\Exception $e) {
+            return $this->jsonResponse(
+                500,
+                false,
+                'Internal Server Error',
+                null
+            );
+        }
+
+    }
+  
 
 }

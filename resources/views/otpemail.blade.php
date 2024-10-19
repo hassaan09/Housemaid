@@ -16,7 +16,11 @@
             <p style="color: #555;">This code will expire in 10 minutes. Please do not share it with anyone.</p>
         </div>
         <div style="padding: 20px; text-align: center; background-color: #f1f1f1; border-radius: 0 0 8px 8px;">
-            <p style="margin: 0; color: #777;">From Team HouseMaide</p>
+            <!-- <p style="margin: 0; color: #777;">From Team HouseMaide</p> -->
+            <p style="margin: 0; color: #777; display: inline-block; vertical-align: middle;">
+                <img src="{{ asset('images/Webp.net-resizeimage.jpg') }}" alt="HouseMaide Logo" style="width: 40px; height: auto; vertical-align: middle; margin-right: 8px;">
+                From Team HouseMaide
+            </p>
         </div>
     </div>
 </body>
